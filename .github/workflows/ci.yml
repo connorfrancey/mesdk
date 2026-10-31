@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+  WINEDEBUG: -all
+
+jobs:
+  linux-mingw:
+    name: Linux / MinGW i686 (${{ matrix.config }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Release, Debug]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install MinGW-w64, Ninja and Wine
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++-mingw-w64-i686 wine wine32:i386
+          wineboot --init || true
+
+      - uses: actions/cache@v6
+        with:
+          path: .cpm-cache
+          key: cpm-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt') }}
+
+      - name: Build and test
+        run: ./test.sh $([[ "${{ matrix.config }}" == Debug ]] && echo --debug)
+
+      - name: Install
+        if: matrix.config == 'Release'
+        run: cmake --install build/mingw-release --prefix "$RUNNER_TEMP/mesdk-i686"
+
+      - name: Upload the example mod
+        if: matrix.config == 'Release'
+        uses: actions/upload-artifact@v7
+        with:
+          name: hello_mod
+          path: build/mingw-release/examples/hello_mod/hello_mod.dll
+
+  windows-msvc:
+    name: Windows / MSVC Win32
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        with:
+          path: .cpm-cache
+          key: cpm-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt') }}
+
+      - name: Configure
+        run: cmake --preset msvc-x86
+
+      - name: Build
+        run: cmake --build --preset msvc-x86 --parallel
+
+      - name: Test
+        run: ctest --preset msvc-x86
+
+  consumer:
+    name: Consumer template (CPM, this checkout)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install MinGW-w64 and Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++-mingw-w64-i686
+
+      - uses: actions/cache@v6
+        with:
+          path: .cpm-cache
+          key: cpm-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt') }}
+
+      - name: Build examples/consumer against this checkout
+        working-directory: examples/consumer
+        run: |
+          cmake --preset release -DCPM_mesdk_SOURCE="$GITHUB_WORKSPACE"
+          cmake --build --preset release
+          test -f build/my_mod.dll
+
+  docs:
+    name: Docs (Doxygen)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install MinGW-w64, Ninja, Doxygen and Graphviz
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++-mingw-w64-i686 doxygen graphviz
+
+      - uses: actions/cache@v6
+        with:
+          path: .cpm-cache
+          key: cpm-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt') }}
+
+      - name: Build the docs
+        run: |
+          cmake --preset mingw-release -DMESDK_BUILD_DOCS=ON -DMESDK_BUILD_TESTS=OFF -DMESDK_BUILD_EXAMPLES=OFF
+          cmake --build --preset mingw-release --target mesdk_docs
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: docs
+          path: build/mingw-release/docs/html
