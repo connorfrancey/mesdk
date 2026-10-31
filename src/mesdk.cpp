@@ -25,6 +25,61 @@ void *ReadOperand(void *match) {
     return *reinterpret_cast<void **>(reinterpret_cast<unsigned char *>(match) + 2);
 }
 
+bool IsReadable(const MEMORY_BASIC_INFORMATION &region) {
+    constexpr DWORD readable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
+                               PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    return region.State == MEM_COMMIT && (region.Protect & readable) &&
+           !(region.Protect & PAGE_GUARD);
+}
+
+// Like Pattern::FindPattern(module, ...), but only reads committed, readable pages. Some system DLLs
+// on Windows have pages in their image that can't be read, and scanning those would crash.
+// Adjacent readable regions are scanned as one run, so a match can span them.
+void *FindInModule(const char *module, const char *pattern, const char *mask) {
+    const auto handle = GetModuleHandleA(module);
+    MODULEINFO info{};
+    if (!handle || !GetModuleInformation(GetCurrentProcess(), handle, &info, sizeof(info))) {
+        return nullptr;
+    }
+
+    const auto begin = static_cast<unsigned char *>(info.lpBaseOfDll);
+    const auto end = begin + info.SizeOfImage;
+    unsigned char *runStart = nullptr;
+    auto address = begin;
+
+    while (address < end) {
+        MEMORY_BASIC_INFORMATION region{};
+        if (!VirtualQuery(address, &region, sizeof(region))) {
+            break;
+        }
+
+        auto regionEnd = static_cast<unsigned char *>(region.BaseAddress) + region.RegionSize;
+        if (regionEnd > end) {
+            regionEnd = end;
+        }
+
+        if (IsReadable(region)) {
+            if (!runStart) {
+                runStart = address;
+            }
+        } else if (runStart) {
+            if (const auto match = Pattern::FindPattern(
+                    runStart, static_cast<int>(address - runStart), pattern, mask)) {
+                return match;
+            }
+            runStart = nullptr;
+        }
+
+        address = regionEnd;
+    }
+
+    if (runStart) {
+        return Pattern::FindPattern(runStart, static_cast<int>(address - runStart), pattern, mask);
+    }
+
+    return nullptr;
+}
+
 } // namespace
 
 const char *mesdk::ToString(Status status) {
@@ -49,12 +104,12 @@ mesdk::Status mesdk::Initialize(const char *module) {
         return Status::ModuleNotFound;
     }
 
-    const auto names = Pattern::FindPattern(module, GNamesPattern, GNamesMask);
+    const auto names = FindInModule(module, GNamesPattern, GNamesMask);
     if (!names) {
         return Status::GNamesNotFound;
     }
 
-    const auto objects = Pattern::FindPattern(module, GObjectsPattern, GObjectsMask);
+    const auto objects = FindInModule(module, GObjectsPattern, GObjectsMask);
     if (!objects) {
         return Status::GObjectsNotFound;
     }
@@ -72,7 +127,7 @@ bool mesdk::IsInitialized() {
 }
 
 void *mesdk::FindProcessEvent(const char *module) {
-    return Pattern::FindPattern(module, ProcessEventPattern, ProcessEventMask);
+    return FindInModule(module, ProcessEventPattern, ProcessEventMask);
 }
 
 bool mesdk::HookProcessEvent(ProcessEventFn detour, ProcessEventFn *original) {
