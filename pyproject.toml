@@ -1,0 +1,21 @@
+[project]
+name = "mesdk-tools"
+version = "0.1.0"
+description = "Build, test and clean helper for the mesdk C++ project"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "click>=8.1",
+  "rich>=13.7",
+]
+
+[project.scripts]
+mesdk = "mesdk_tools.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+# Only the Python tooling is a package; the C++ sources next to it are not part of it
+[tool.setuptools.packages.find]
+where = ["tools"]

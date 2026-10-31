@@ -1,0 +1,43 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "mingw-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/mingw-i686.cmake",
+      "cacheVariables": { "CMAKE_EXPORT_COMPILE_COMMANDS": "ON" }
+    },
+    {
+      "name": "mingw-release",
+      "displayName": "MinGW i686 (Release)",
+      "description": "Cross-compile for 32-bit Windows from Linux",
+      "inherits": "mingw-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "mingw-debug",
+      "displayName": "MinGW i686 (Debug)",
+      "inherits": "mingw-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "msvc-x86",
+      "displayName": "Visual Studio (Win32)",
+      "architecture": "Win32",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "mingw-release", "configurePreset": "mingw-release" },
+    { "name": "mingw-debug", "configurePreset": "mingw-debug" },
+    { "name": "msvc-x86", "configurePreset": "msvc-x86", "configuration": "Release" }
+  ],
+  "testPresets": [
+    { "name": "mingw-release", "configurePreset": "mingw-release", "output": { "outputOnFailure": true } },
+    { "name": "msvc-x86", "configurePreset": "msvc-x86", "configuration": "Release", "output": { "outputOnFailure": true } }
+  ]
+}
